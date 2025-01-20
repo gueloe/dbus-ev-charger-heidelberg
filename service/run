@@ -1,0 +1,4 @@
+#!/bin/sh
+echo "*** starting dbus-ev-charger-heidelberg ***"
+exec 2>&1
+python /data/dbus-d0-smartmeter/dbus-ev-charger-heidelberg.py
