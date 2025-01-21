@@ -1,486 +1,391 @@
 #!/usr/bin/env python
- 
+
 # import normal packages
+import platform
 import logging
 import sys
 import os
-import platform
 if sys.version_info.major == 2:
     import gobject
 else:
     from gi.repository import GLib as gobject
-import sys
-import time
-import requests # for http GET
+#import time
+#import math
+#import requests # for http GET
 import configparser # for config/ini file
-
 import serial
-from re import match
-from math import cos, pi
-
-import signal
-def signal_term_handler(signal, frame):
-  logging.warning('got SIGTERM')
-  smrtmtr_output._setConnected(0)
-  exit(1)
-signal.signal(signal.SIGTERM, signal_term_handler)
+import minimalmodbus
 
 
-#import subprocess
-
-start = '1b1b1b1b01010101'
-end = '1b1b1b1b1a'
-obisintro = '77070100'
-obis = {
-        '100700': 'w',
-        '240700': 'w_l1',
-        '380700': 'w_l2',
-        '4c0700': 'w_l3',
-        '010800': 'wh',
-        '020800': 'whgiven',
-        '200700': 'v_l1',
-        '340700': 'v_l2',
-        '480700': 'v_l3',
-        '1f0700': 'a_l1',
-        '330700': 'a_l2',
-        '470700': 'a_l3',
-        '0e0700': 'hz',
-        '510701': 'd_v2v1',
-        '510702': 'd_v3v1',
-        '510704': 'd_a1v1',
-        '51070f': 'd_a2v2',
-        '51071a': 'd_a3v3',
-       }
-calcs = {
-         #'240700': 'cos(values[\'510704\']/180.0*pi)*values[\'200700\']*values[\'1f0700\']',
-         #'380700': 'cos(values[\'51070f\']/180.0*pi)*values[\'340700\']*values[\'330700\']',
-         #'4c0700': 'cos(values[\'51071a\']/180.0*pi)*values[\'480700\']*values[\'470700\']',
-        }
-
-crc16_x25_table = [
-        0x0000, 0x1189, 0x2312, 0x329B, 0x4624, 0x57AD, 0x6536, 0x74BF,
-        0x8C48, 0x9DC1, 0xAF5A, 0xBED3, 0xCA6C, 0xDBE5, 0xE97E, 0xF8F7,
-        0x1081, 0x0108, 0x3393, 0x221A, 0x56A5, 0x472C, 0x75B7, 0x643E,
-        0x9CC9, 0x8D40, 0xBFDB, 0xAE52, 0xDAED, 0xCB64, 0xF9FF, 0xE876,
-        0x2102, 0x308B, 0x0210, 0x1399, 0x6726, 0x76AF, 0x4434, 0x55BD,
-        0xAD4A, 0xBCC3, 0x8E58, 0x9FD1, 0xEB6E, 0xFAE7, 0xC87C, 0xD9F5,
-        0x3183, 0x200A, 0x1291, 0x0318, 0x77A7, 0x662E, 0x54B5, 0x453C,
-        0xBDCB, 0xAC42, 0x9ED9, 0x8F50, 0xFBEF, 0xEA66, 0xD8FD, 0xC974,
-        0x4204, 0x538D, 0x6116, 0x709F, 0x0420, 0x15A9, 0x2732, 0x36BB,
-        0xCE4C, 0xDFC5, 0xED5E, 0xFCD7, 0x8868, 0x99E1, 0xAB7A, 0xBAF3,
-        0x5285, 0x430C, 0x7197, 0x601E, 0x14A1, 0x0528, 0x37B3, 0x263A,
-        0xDECD, 0xCF44, 0xFDDF, 0xEC56, 0x98E9, 0x8960, 0xBBFB, 0xAA72,
-        0x6306, 0x728F, 0x4014, 0x519D, 0x2522, 0x34AB, 0x0630, 0x17B9,
-        0xEF4E, 0xFEC7, 0xCC5C, 0xDDD5, 0xA96A, 0xB8E3, 0x8A78, 0x9BF1,
-        0x7387, 0x620E, 0x5095, 0x411C, 0x35A3, 0x242A, 0x16B1, 0x0738,
-        0xFFCF, 0xEE46, 0xDCDD, 0xCD54, 0xB9EB, 0xA862, 0x9AF9, 0x8B70,
-        0x8408, 0x9581, 0xA71A, 0xB693, 0xC22C, 0xD3A5, 0xE13E, 0xF0B7,
-        0x0840, 0x19C9, 0x2B52, 0x3ADB, 0x4E64, 0x5FED, 0x6D76, 0x7CFF,
-        0x9489, 0x8500, 0xB79B, 0xA612, 0xD2AD, 0xC324, 0xF1BF, 0xE036,
-        0x18C1, 0x0948, 0x3BD3, 0x2A5A, 0x5EE5, 0x4F6C, 0x7DF7, 0x6C7E,
-        0xA50A, 0xB483, 0x8618, 0x9791, 0xE32E, 0xF2A7, 0xC03C, 0xD1B5,
-        0x2942, 0x38CB, 0x0A50, 0x1BD9, 0x6F66, 0x7EEF, 0x4C74, 0x5DFD,
-        0xB58B, 0xA402, 0x9699, 0x8710, 0xF3AF, 0xE226, 0xD0BD, 0xC134,
-        0x39C3, 0x284A, 0x1AD1, 0x0B58, 0x7FE7, 0x6E6E, 0x5CF5, 0x4D7C,
-        0xC60C, 0xD785, 0xE51E, 0xF497, 0x8028, 0x91A1, 0xA33A, 0xB2B3,
-        0x4A44, 0x5BCD, 0x6956, 0x78DF, 0x0C60, 0x1DE9, 0x2F72, 0x3EFB,
-        0xD68D, 0xC704, 0xF59F, 0xE416, 0x90A9, 0x8120, 0xB3BB, 0xA232,
-        0x5AC5, 0x4B4C, 0x79D7, 0x685E, 0x1CE1, 0x0D68, 0x3FF3, 0x2E7A,
-        0xE70E, 0xF687, 0xC41C, 0xD595, 0xA12A, 0xB0A3, 0x8238, 0x93B1,
-        0x6B46, 0x7ACF, 0x4854, 0x59DD, 0x2D62, 0x3CEB, 0x0E70, 0x1FF9,
-        0xF78F, 0xE606, 0xD49D, 0xC514, 0xB1AB, 0xA022, 0x92B9, 0x8330,
-        0x7BC7, 0x6A4E, 0x58D5, 0x495C, 0x3DE3, 0x2C6A, 0x1EF1, 0x0F78]
- 
 # our own packages from victron
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/dbus-systemcalc-py/ext/velib_python'))
 from vedbus import VeDbusService
 
-#from ve_utils import exit_on_error
-from settingsdevice import SettingsDevice
-from dbus import SystemBus, SessionBus
-from traceback import print_exc
-def exit_on_error(func, *args, **kwargs):
-  try:
-    return func(*args, **kwargs)
-  except:
-    try:
-      print ('exit_on_error: there was an exception. Printing stacktrace will be tried and then exit')
-      print_exc()
-      smrtmtr_output._setConnected(0)
-    except:
-      pass
-    # sys.exit() is not used, since that throws an exception, which does not lead to a program
-    # halt when used in a dbus callback, see connection.py in the Python/Dbus libraries, line 230.
-    os._exit(1)
 
-def handle_changed_setting(setting, oldvalue, newvalue):
-  logging.info('setting %s changed: %s => %s' % (setting, oldvalue, newvalue))
+"""
+Wallbox settings:
 
-class DbusttysmartmeterService:
-  def __init__(self, config, servicename, paths, productname='ttysmartmeter', connection='ttysmartmeter service'):
-    #config = self._getConfig()
-    accesstype = config['DEFAULT']['AccessType']
-    deviceinstance = int(config['DEFAULT']['Deviceinstance'])
-    customname = config['DEFAULT']['CustomName']
-    devicename = config[accesstype]['Devicename']
-    deviceserialid = '/dev/serial/by-id/%s' %devicename
-    devicepath = os.popen('readlink -f /dev/serial/by-id/%s' %devicename).read().replace('\n', '')
-    ttyname = devicepath.replace('/dev/', '')
-    os.system('/opt/victronenergy/serial-starter/stop-tty.sh %s' %ttyname)
+PV Excess needs to be activated and configured to use "auto" mode (PV Excess)
+External control also needs to be activated
+"""
 
-    self._initialized = not (len(sys.argv) >= 2)
-    logging.info("current initialized-state = %r" %self._initialized)
-
-    devicebaudrate = int(config[accesstype]['Baudrate'])
-    readinterval = int(config[accesstype]['ReadInterval'])
-    self._timeoutInterval = int(config['DEFAULT']['TimeoutInterval'])
-    self._exitOnTimeout = int(config['DEFAULT']['ExitOnTimeout'])
-    exitAfterHours = float(config['DEFAULT']['ExitAfterHours'])
-    self._eurPerKwh = float(config['DEFAULT']['EurPerKwh'])
-    self._regex = config['DEFAULT']['Regex']
-    self._postRawdata = int(config['DEFAULT']['PostRawdata'])
-    self._changeSmartmeter = int(config['DEFAULT']['ChangeSmartmeter'])
-    if self._changeSmartmeter:
-      self._settings = SettingsDevice(
-        bus=SystemBus() if (platform.machine() == 'armv7l') else SessionBus(),
-        supportedSettings={
-          'RunWithoutGridMeter': ['/Settings/CGwacs/RunWithoutGridMeter', 1, 0, 1],
-        },
-        eventCallback=handle_changed_setting
-      )
-      self._setConnected(0)
-    logging.info("Opening %s" %devicepath)
-    self._port = serial.Serial(
-      port=devicepath,
-      baudrate=devicebaudrate,
-      parity=serial.PARITY_NONE,
-      stopbits=serial.STOPBITS_ONE,
-      bytesize=serial.EIGHTBITS
-    )
-    self._port.reset_input_buffer()
-    self._port.reset_output_buffer()
-
-    # last update
-    self._lastUpdate = time.time()
-    self._stats = 0
-
-    # tty-data
-    self._rawdata = ''
-
-    while not self._initialized:
-      if self._update():
-        self._initialized = True
-        logging.info("received smartmeter-data - start DBUS initialization...")
-      else:
-        time.sleep(readinterval/1000)
-    
-    self._dbusservice = VeDbusService("{}.{}".format(servicename, devicename))
-    self._paths = paths
-    
-    logging.debug("%s /DeviceInstance = %d" % (servicename, deviceinstance))
-    
-    # Create the management objects, as specified in the ccgx dbus-api document
-    self._dbusservice.add_path('/Mgmt/ProcessName', __file__)
-    self._dbusservice.add_path('/Mgmt/ProcessVersion', 'Unkown version, and running on Python ' + platform.python_version())
-    self._dbusservice.add_path('/Mgmt/Connection', connection)
-
-    # Create the mandatory objects
-    self._dbusservice.add_path('/DeviceInstance', deviceinstance)
-    #self._dbusservice.add_path('/ProductId', 45069) # value used in ac_sensor_bridge.cpp of dbus-cgwacs
-    self._dbusservice.add_path('/ProductId', 0xFFFF) # id assigned by Victron Support from SDM630v2.py
-    self._dbusservice.add_path('/ProductName', productname)
-    self._dbusservice.add_path('/CustomName', customname)    
-    self._dbusservice.add_path('/Connected', 0)
-    
-    self._dbusservice.add_path('/Latency', None)    
-    self._dbusservice.add_path('/FirmwareVersion', 0.1)
-    self._dbusservice.add_path('/HardwareVersion', 0)
-    self._dbusservice.add_path('/Position', 0) # normaly only needed for pvinverter
-    self._dbusservice.add_path('/Serial', devicename)
-    #self._dbusservice.add_path('/UpdateIndex', 0)
-    self._dbusservice.add_path('/StatusCode', 0)  # Dummy path so VRM detects us as a PV-inverter.
-
-    self._dbusservice.add_path('/Rawdata', '')  # Dummy path so VRM detects us as a PV-inverter.
-    
-    # add path values to dbus
-    for path, settings in self._paths.items():
-      self._dbusservice.add_path(
-        path, settings['initial'], gettextcallback=settings['textformat'], writeable=True, onchangecallback=self._handlechangedvalue)
-
-    # last update
-    #self._lastUpdate = time.time()
-
-    # tty-data
-    #self._rawdata = ''
-
-    # add _update function 'timer'
-    gobject.timeout_add(readinterval, exit_on_error, self._update) # pause readlinterval before the next request
-    
-    # add _signOfLife 'timer' to get feedback in log every SignOfLifeLog minutes
-    gobject.timeout_add(int(config['DEFAULT']['SignOfLifeLog'])*60*1000, self._signOfLife)
- 
-    # exit after hours?
-    if exitAfterHours > 0:
-      logging.info('exitAfterHours will stop this service after %0.1fh' %exitAfterHours)
-      gobject.timeout_add(exitAfterHours*60*60*1000, exit_on_error, self._exit)
-
-  def _setConnected(self, what):
-    try:
-      self._dbusservice['/Connected'] = what
-      logging.info('changed /Connected to %d' %what)
-    except:
-      pass
-    what = 1-what
-    if self._changeSmartmeter:
-      logging.info('changing RunWithoutGridMeter to %d' %what)
-      self._settings['RunWithoutGridMeter'] = what
-
-  def _exit(self):
-    logging.info('exitAfterHours reached')
-    raise Exception('exitAfterHours reached') 
-  
-  def _getTtyRawData(self):
-    chars = self._port.read(self._port.inWaiting())
-    for char in chars:
-      self._rawdata += format(char, '02x')
-    pos = self._rawdata.find(end)
-    if (pos == -1) or (pos+len(end)+6 > len(self._rawdata)):
-      return False
-    data = self._rawdata[:pos+len(end)+6]
-    self._rawdata = self._rawdata[pos+len(end)+6:]
-    pos = data.rfind(start)
-    if (pos == -1):
-      return False
-    return data[pos:]
-
-  # https://www.stefan-weigert.de/php_loader/sml.php
-  def _validateChecksum(self, data):
-    global crc16_x25_table
-    data = bytes.fromhex(data)
-    crc_rx = data[-1]*256 + data[-2] #CRC Bytes getauscht in eine Variable speichern
-    crcsum = 0xffff
-    for byte in data[0:-2]:
-      crcsum = crc16_x25_table[(byte ^ crcsum) & 0xff] ^ (crcsum >> 8 & 0xff)
-    crcsum ^= 0xffff
-    return (crc_rx == crcsum)
-
-  def _extractObisFromRawData(self, data):
-    values = {}
-    for s in data.split(obisintro):
-       value = None
-       g = match('^(.{6})ff(.+)', s)
-       if not g: continue
-       (object, raw) = (g.group(1), g.group(2))
-       # Groups: physical unit, scalar, signed or unsigned, value-length 2-5 repectivly 1-4 bytes, value itself
-       #g2 = match('^(?:..){2,}?62(.{2})52([0f].)([56])([2-5])((?:..){1,4})01', raw)
-       g2 = match(self._regex, raw)
-       if g2 and len(g2.group(5))/2 >= int(g2.group(4))-1:
-         logging.debug([g2.group(1), g2.group(2), g2.group(3), g2.group(4), g2.group(5)])
-         signed = (g2.group(3) == '5')
-         extract = g2.group(5)[:(int(g2.group(4))-1)*2]
-         factor = pow(10, int.from_bytes(bytes.fromhex(g2.group(2)), byteorder='big', signed=True))
-         value = int.from_bytes(bytes.fromhex(extract), byteorder='big', signed=signed)*factor
-         logging.debug(value)
-       ###
-       if not self._initialized:
-         if object in obis:
-           configured = obis[object]
-         else:
-           configured = 'unused'
-         logging.info('received OBIS Code %s (%s)' %(object, configured))
-       logging.debug(object + ' => ' + raw)
-       if object in obis and value is not None:
-         values[object] = value
-         logging.debug(obis[object])
-       logging.debug('---')
-    #for k in calcs.keys():
-    #  if k in values:
-    #    continue
-    #  try:
-    #    values[k] = eval(calcs[k])
-    #  except:
-    #    logging.debug('could not evaluate %s' %k)
-
-    return values
-
-  def _convertObisToValues(self, values):
-    if '100700' not in values:
-      logging.warning('OBIS Code 100700 (power) is missing')
-      return False
-    try:
-      if not ('240700' in values and '380700' in values and '4c0700' in values):
-        try:
-          values['240700'] = cos(values['510704']/180*pi)*values['200700']*values['1f0700']
-          values['380700'] = cos(values['51070f']/180*pi)*values['340700']*values['330700']
-          values['4c0700'] = cos(values['51071a']/180*pi)*values['480700']*values['470700']
-        except:
-          wthird = values['100700']/3
-          values['240700'], values['380700'], values['4c0700'] = wthird, wthird, wthird
-      thirddiff = (values['100700']-(values['240700']+values['380700']+values['4c0700']))/3
-      # Calculate Current Values, if not in OBIS Data
-      if not ('1f0700' in values and '330700' in values and '470700' in values) and values['200700'] > 0 and values['340700'] > 0 and values['480700'] > 0:
-        try:
-          values['1f0700'] = values['240700']/values['200700']
-          values['330700'] = values['380700']/values['340700']
-          values['470700'] = values['4c0700']/values['480700']
-        except:
-          logging.debug('could not calculate Current Values' )
-      ret = {
-        '/Ac/Power': round(values['100700'], 1),
-        '/Ac/Energy/Forward': '010800' in values and round(values['010800']/1000, 1) or None,
-        '/Ac/Energy/Reverse': '020800' in values and round(values['020800']/1000, 1) or None,
-        #'/Ac/L1/Energy/Forward': 0,
-        #'/Ac/L2/Energy/Forward': 0,
-        '/Ac/L2/Energy/Forward': '020800' in values and round(values['020800']/1000*self._eurPerKwh, 2) or None,
-        #'/Ac/L3/Energy/Forward': 0,
-        '/Ac/L3/Energy/Forward': '020800' in values and round(values['020800']/1000, 1) or None,
-        #'/Ac/Energy/Reverse': 0,
-        #'/Ac/L1/Energy/Reverse': 0,
-        #'/Ac/L2/Energy/Reverse': 0,
-        #'/Ac/L3/Energy/Reverse': 0,
-        '/Ac/L1/Voltage': '200700' in values and round(values['200700'], 1) or None,
-        '/Ac/L2/Voltage': '340700' in values and round(values['340700'], 1) or None,
-        '/Ac/L3/Voltage': '480700' in values and round(values['480700'], 1) or None,
-        '/Ac/L1/Current': '1f0700' in values and round(values['1f0700'], 2) or None,
-        '/Ac/L2/Current': '330700' in values and round(values['330700'], 2) or None,
-        '/Ac/L3/Current': '470700' in values and round(values['470700'], 2) or None,
-        '/Ac/L1/Power': round(values['240700']+thirddiff, 1),
-        '/Ac/L2/Power': round(values['380700']+thirddiff, 1),
-        '/Ac/L3/Power': round(values['4c0700']+thirddiff, 1),
-      }
-    except Exception as e:
-      logging.debug('Error at _convertObisToValues', exc_info=e)
-      return False
-    self._stats = self._stats+1
-    return ret
- 
- 
-  def _signOfLife(self):
-    logging.info("Got %d measurements, last _update() call: %d" % (self._stats, self._lastUpdate))
-    self._stats = 0
-    #logging.info("Last '/Ac/Power': %s" % (self._dbusservice['/Ac/Power']))
-    return True
- 
-  def _update(self):
-    news = False
-    try:
-      # get data from ttysmartmeter
-      rawdata = self._getTtyRawData()
-      logging.debug('rawdata=%s' %rawdata)
-      if rawdata:
-        if self._validateChecksum(rawdata):
-          # extract obis from rawdata
-          obisdata = self._extractObisFromRawData(rawdata)
-          logging.debug('obisdata=%s' %obisdata)
-          if obisdata:
-            # convert obis to usable values
-            values = self._convertObisToValues(obisdata)
-            logging.debug('values=%s' %values)
-            if values:
-              # real power meter data were received
-              if not self._initialized:
-                return True
-              if self._postRawdata:
-                values['/Rawdata'] = rawdata
-              for k in values:
-                self._dbusservice[k] = values[k]
-              if self._dbusservice['/Connected'] == 0:
-                logging.info('smartmeter-data received')
-                self._setConnected(1)
-              self._lastUpdate = time.time()
-              news = True
-        else:
-          logging.info('checksum failed for rawdata=%s' %rawdata)
-      #if self._lastUpdate+self._timeoutInterval/1000 < time.time():
-      #  #raise ConnectionError('No correct data received')
-      #  logging.debug('No correct data received')
+class DbusHeidelbergChargerService:
+    def __init__(self, servicename, paths, productname='Heidelberg-charger', connection='Heidelberg-Charger Modbus RTU service'):
+        config = self._getConfig()
+        deviceinstance = int(config['DEFAULT']['Deviceinstance'])
+        
+        devicename = config['ModbusRTU']['Devicename']
+        #deviceserialid = '/dev/serial/by-id/%s' %devicename
+        devicepath = os.popen('readlink -f /dev/serial/by-id/%s' %devicename).read().replace('\n', '')
+        ttyname = devicepath.replace('/dev/', '')
+        os.system('/opt/victronenergy/serial-starter/stop-tty.sh %s' %ttyname)
+        global client1
+        logging.info("init devicepath=%s ttyname=%s"   % (devicepath, ttyname))
+        client1 = minimalmodbus.Instrument(devicepath, 1, debug=False)  # port name, slave address (in decimal)
+        client1.serial.baudrate = 19200  # baudrate
+        client1.serial.bytesize = 8
+        client1.serial.parity   = serial.PARITY_EVEN
+        client1.serial.stopbits = 1
+        client1.serial.timeout  = 0.1      # seconds
+        client1.address         = 1        # this is the slave address number
+        client1.mode = minimalmodbus.MODE_RTU # rtu or ascii mode
+        client1.clear_buffers_before_each_transaction = True
+        print(client1)
        
-    except Exception as e:
-       logging.critical('Error at _update', exc_info=e)
 
-    # is the timeout exceeded
-    if self._lastUpdate+self._timeoutInterval/1000 < time.time():
-      if not self._initialized or self._dbusservice['/Connected'] == 1:
-        if self._initialized:
-          self._setConnected(0)
-        logging.warning('no smartmeter-data received since %d ms' %self._timeoutInterval)
-        news = True
-      if self._exitOnTimeout:
-        logging.warning('...exiting due to missing smartmeter-data since %d ms' %self._timeoutInterval)
-        raise Exception('Exception due to missing smartmeter-data since %d ms' %self._timeoutInterval)
 
-    #if news:
-    #   # increment UpdateIndex - to show that new data is available
-    #   self._dbusservice['/UpdateIndex'] = (self._dbusservice['/UpdateIndex']+1)%256  # increment index
- 
-    # return true, otherwise add_timeout will be removed from GObject - see docs http://library.isr.ist.utl.pt/docs/pygtk2reference/gobject-functions.html#function-gobject--timeout-add
-    return self._initialized
- 
-  def _handlechangedvalue(self, path, value):
-    logging.debug("someone else updated %s to %s" % (path, value))
-    return True # accept the change
- 
+       # self.ip = str(config['DEFAULT']['IP'])
+        self.acposition = int(config['DEFAULT']['Position'])
+
+        self._dbusservice = VeDbusService("{}.http_{:02d}".format(servicename, deviceinstance))
+        self._paths = paths
+
+        self.enable_charging = True # start/stop
+
+        logging.debug("%s /DeviceInstance = %d" % (servicename, deviceinstance))
+
+        # get general data from Heidelberg-Charger
+        #version = self.getHeidelbergChargerData("/info/version")
+        #name = self.getHeidelbergChargerData("/info/name")
+        #displayname = self.getHeidelbergChargerData("/info/display_name")
+
+        # Create the management objects, as specified in the ccgx dbus-api document
+        self._dbusservice.add_path('/Mgmt/ProcessName', __file__)
+        self._dbusservice.add_path('/Mgmt/ProcessVersion', 'Unkown version, and running on Python ' + platform.python_version())
+        self._dbusservice.add_path('/Mgmt/Connection', connection)
+
+        # Create the mandatory objects
+        self._dbusservice.add_path('/DeviceInstance', deviceinstance)
+        self._dbusservice.add_path('/ProductId', 0xFFFF)
+        self._dbusservice.add_path('/ProductName', productname)
+        self._dbusservice.add_path('/CustomName', 'SU04-Heidelberg')
+        self._dbusservice.add_path('/FirmwareVersion', 'FirmwareVersion 1.0?')
+        self._dbusservice.add_path('/Serial', 'Serial')
+        self._dbusservice.add_path('/HardwareVersion', 'Energy Control')
+        self._dbusservice.add_path('/Connected', 1)
+        self._dbusservice.add_path('/UpdateIndex', 0)
+        self._dbusservice.add_path('/Position', self.acposition) # 0: ac out, 1: ac in
+
+        # add path values to dbus
+        for path, settings in self._paths.items():
+            self._dbusservice.add_path(path, settings['initial'], gettextcallback=settings['textformat'], writeable=True, onchangecallback=self._handlechangedvalue)
+
+        # last update
+        self._lastUpdate = 0
+
+        # charging time in float
+        self._chargingTime = 0.0
+
+        # add _update function 'timer'
+        gobject.timeout_add(2000, self._update) # pause 2000ms before the next request
+
+        # add _signOfLife 'timer' to get feedback in log every 5minutes
+        gobject.timeout_add(self._getSignOfLifeInterval()*60*1000, self._signOfLife)
+
+    def _getConfig(self):
+        config = configparser.ConfigParser()
+        config.read("%s/config.ini" % (os.path.dirname(os.path.realpath(__file__))))
+        return config
+
+    
+    def _getSignOfLifeInterval(self):
+        config = self._getConfig()
+        value = config['DEFAULT']['SignOfLifeLog']
+
+        if not value:
+            value = 0
+
+        return int(value)
+
+
+    def _handlechangedvalue(self, path, value):
+        logging.critical("someone else updated %s to %s" % (path, value))
+
+        # if path == '/MaxCurrent':
+        #     self.setHeidelbergChargerValue("/evse/external_current", {"current": int(value * 1000)})
+        # elif path == '/SetCurrent':
+        #     pass # ignore, only maxCurrent Implemented
+        # elif path == '/AutoStart':
+        #     if value == 0:
+        #         self.setHeidelbergChargerValue("/evse/auto_start_charging", {"auto_start_charging": "false"})
+        #     else:
+        #         self.setHeidelbergChargerValue("/evse/auto_start_charging", {"auto_start_charging": "true"})
+        # elif path == '/Mode':
+        #     if value == 0: # manual
+        #         self.setHeidelbergChargerValue("/power_manager/charge_mode", {"mode": 0}) # fast
+        #     elif value == 1: # automatic
+        #         self.setHeidelbergChargerValue("/power_manager/charge_mode", {"mode": 2}) # pv
+        #     elif value == 2:
+        #         pass # schedule not implemented
+
+        # elif path == '/StartStop':
+        #     if value == 0:
+        #         self.setHeidelbergChargerValue("/evse/stop_charging", {})
+        #         self.enable_charging = False
+        #     else:
+        #         self.setHeidelbergChargerValue("/evse/start_charging", {})
+        #         self.enable_charging = True
+
+
+    def setHeidelbergChargerValue(self, path, dat):
+        try:
+            logging.info("setHeidelbergChargerValue")
+           # request_data = requests.put(url = "http://" + self.ip + path, json = dat, timeout=5)
+        except Exception as e:
+            logging.critical('Error at %s', '_update', exc_info=e)
+
+
+    def getHeidelbergChargerData(self, path):
+
+       
+
+        #URL = "http://" + self.ip + path
+        try:
+            logging.info("getHeidelbergChargerData")
+           # request_data = requests.get(url = URL, timeout=5)
+        except Exception:
+            return None
+
+        # check for response
+        #if not request_data:
+        #    raise ConnectionError("No response from Heidelberg Charger - %s" % (URL))
+
+        #json_data = request_data.json()
+
+        # check for Json
+        #if not json_data:
+        #   raise ValueError("Converting response to JSON failed")
+        json_data = '';
+        return json_data
+
+    def _signOfLife(self):
+        logging.info("--- Start: sign of life ---")
+        logging.info("Last _update() call: %s" % (self._lastUpdate))
+        logging.info("Last '/Ac/Power': %s" % (self._dbusservice['/Ac/Power']))
+        logging.info("--- End: sign of life ---")
+        return True
+
+    def _update(self):
+        try:
+            logging.info("Update")
+            data = client1.read_registers(4, 15,functioncode=4)  # Registernumber, number of decimals
+            logging.info("Update Version%x Status%i" % (data[0],data[1]))
+            self._dbusservice['/Ac/Energy/Forward'] = (data[14] + (data[13]*65536))/10
+            client1.write_register(261, 60,functioncode=6) 
+           # print("data: ", data)
+         
+            # # read out meter values (only Heidelberg Pro Charger)
+            # config = self.getHeidelbergChargerData("/meters/0/config")
+            # enegry_import = float('nan')
+            # if config is not None and config[1] != None:
+            #     # read meter data
+            #     value_ids = self.getHeidelbergChargerData("/meters/0/value_ids")
+            #     values = self.getHeidelbergChargerData("/meters/0/values")
+            #     if values is not None and value_ids is not None:
+            #         def get_meter_value(value_id):
+            #             try:
+            #                 return float(values[value_ids.index(value_id)])
+            #             except:
+            #                 return float('nan')
+
+            #         VoltageLNAvg = 7
+            #         CurrentLSumImExSum = 33
+            #         PowerActiveL1ImExDiff = 39
+            #         PowerActiveL2ImExDiff = 48
+            #         PowerActiveL3ImExDiff = 57
+            #         PowerActiveLSumImExDiff = 74
+            #         EnergyActiveLSumImport = 209
+            #         EnergyActiveLSumImExSum = 213
+            #         FrequencyLAvg = 364
+
+            #         self._dbusservice['/Ac/L1/Power'] = get_meter_value(PowerActiveL1ImExDiff)
+            #         self._dbusservice['/Ac/L2/Power'] = get_meter_value(PowerActiveL2ImExDiff)
+            #         self._dbusservice['/Ac/L3/Power'] = get_meter_value(PowerActiveL3ImExDiff)
+
+            #         self._dbusservice['/Ac/Power'] = get_meter_value(PowerActiveLSumImExDiff)
+            #         self._dbusservice['/Ac/Voltage'] = get_meter_value(VoltageLNAvg)
+            #         self._dbusservice['/Ac/Frequency'] = get_meter_value(FrequencyLAvg)
+
+            #         self._dbusservice['/Current'] = get_meter_value(CurrentLSumImExSum)
+
+            #         enegry_import = get_meter_value(EnergyActiveLSumImport)
+            #         if math.isnan(enegry_import):
+            #             enegry_import = get_meter_value(EnergyActiveLSumImExSum)
+
+            # # read mode stuff
+            # pmcm = self.getHeidelbergChargerData("/power_manager/charge_mode")
+            # if pmcm["mode"] == 0: # fast
+            #     self._dbusservice['/Mode'] = 0 # manual
+            # elif pmcm["mode"] == 1: # disabled
+            #     self._dbusservice['/Mode'] = 0 # manual
+            #     self._dbusservice['/StartStop'] = 0 # disabled
+            # elif pmcm["mode"] == 2 or pmcm["mode"] == 3: # pv / pv+min
+            #     self._dbusservice['/Mode'] = 1 # automatic
+
+            # # read all other data
+            # cc = self.getHeidelbergChargerData("/charge_tracker/current_charge")
+            # es = self.getHeidelbergChargerData("/evse/state")
+            # ell = self.getHeidelbergChargerData("/evse/low_level_state")
+            # esl = self.getHeidelbergChargerData("/evse/slots")
+
+            # #self._dbusservice['/MaxCurrent'] = float(es["allowed_charging_current"] / 1000.0) # will be set to 0A e.g. by load management
+            # self._dbusservice['/MaxCurrent'] = float(esl[8]["max_current"] / 1000.0) # external config slot
+
+            # if es is not None and ell is not None:
+            #     if es["charger_state"] == 3:
+            #         self._dbusservice['/ChargingTime'] = int(ell["time_since_state_change"] / 1000.0)
+            #         self._dbusservice['/Ac/Energy/Forward'] = float(enegry_import - cc["meter_start"]) # calculate charged energy
+            #     else:
+            #         self._dbusservice['/ChargingTime'] = 0
+            #         self._dbusservice['/Ac/Energy/Forward'] = 0.0 # calculate charged energy
+
+            # if es["charger_state"] == 0: # not connected
+            #     self._dbusservice['/Status'] = 0 # not connected
+            # elif es["charger_state"] == 1: # connected - wait for ok
+            #     self._dbusservice['/Status'] = 5 # waiting for RFID
+            # elif es["charger_state"] == 2: # ready to charge
+            #     self._dbusservice['/Status'] = 6 # waiting for start
+            # elif es["charger_state"] == 3: # charging
+            #     self._dbusservice['/Status'] = 2 # charging
+            # elif es["charger_state"] == 4: # error
+            #     if es["error_state"] == 2:
+            #         self._dbusservice['/Status'] = 8 # PLACEHOLDER: ground test error
+            #     elif es["error_state"] == 3:
+            #         self._dbusservice['/Status'] = 11 # residual current
+            #     elif es["error_state"] == 4:
+            #         self._dbusservice['/Status'] = 9 # welded contacts
+            #     elif es["error_state"] == 5:
+            #         self._dbusservice['/Status'] = 10 # communication error
+            #     else:
+            #         self._dbusservice['/Status'] = 8 # PLACEHOLDER: ground test error
+            # else:
+            #     self._dbusservice['/Status'] = 8 # PLACEHOLDER: ground test error
+
+            # easc = self.getHeidelbergChargerData("/evse/auto_start_charging")
+            # if easc["auto_start_charging"]:
+            #     self._dbusservice['/AutoStart'] = 1
+            # else:
+            #     self._dbusservice['/AutoStart'] = 0
+
+            # if not self.enable_charging:
+            #     self._dbusservice['/StartStop'] = 0
+            # else:
+            #     self._dbusservice['/StartStop'] = 1
+
+            # # logging
+            # logging.debug("Wallbox Consumption (/Ac/Power): %s" % (self._dbusservice['/Ac/Power']))
+            # logging.debug("Wallbox Forward (/Ac/Energy/Forward): %s" % (self._dbusservice['/Ac/Energy/Forward']))
+            # logging.debug("---")
+
+            # # increment UpdateIndex - to show that new data is available
+            # index = self._dbusservice['/UpdateIndex'] + 1  # increment index
+            # if index > 255:   # maximum value of the index
+            #     index = 0       # overflow from 255 to 0
+            # self._dbusservice['/UpdateIndex'] = index
+
+            # # update lastupdate vars
+            # self._lastUpdate = time.time()
+
+            # #TODO: missing values
+            # """
+            # '/PCB/Temperature',
+            # '/MCU/Temperature',
+            # '/Handle/Temperature',
+            # '/History/ChargingCycles',
+            # '/History/ConnectorCycles',
+            # '/History/Ac/Energy/Forward',
+            # '/History/Uptime',
+            # '/History/ChargingTime',
+            # '/History/Alerts',
+            # '/History/AverageStartupTemperature',
+            # '/History/AbortedChargingCycles',
+            # '/History/ThermalFoldbacks'
+            # """
+
+        except Exception as e:
+            logging.critical('Error at %s', '_update', exc_info=e)
+            logging.critical(e)
+
+        # return true, otherwise add_timeout will be removed from GObject - see docs http://library.isr.ist.utl.pt/docs/pygtk2reference/gobject-functions.html#function-gobject--timeout-add
+        return True
 
 
 def main():
+    # configure logging
+    logging.basicConfig(  format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                          datefmt='%Y-%m-%d %H:%M:%S',
+                          level=logging.INFO,
+                          handlers=[
+                              logging.FileHandler("%s/current.log" % (os.path.dirname(os.path.realpath(__file__)))),
+                              logging.StreamHandler()
+                          ]
+                        )
 
-  config = configparser.ConfigParser()
-  config.read("%s/config.ini" % (os.path.dirname(os.path.realpath(__file__))))
+    try:
+        logging.info("Start")
 
-  global smrtmtr_output, logging
-  logging.basicConfig(      format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
-                            datefmt='%Y-%m-%d %H:%M:%S',
-                            #level=logging.DEBUG,
-                            level=config['DEFAULT']['Logging'])
- 
-  try:
-      logging.info("Starting...");
-  
-      from dbus.mainloop.glib import DBusGMainLoop
-      # Have a mainloop, so we can send/receive asynchronous calls to and from dbus
-      DBusGMainLoop(set_as_default=True)
+        from dbus.mainloop.glib import DBusGMainLoop
+        # Have a mainloop, so we can send/receive asynchronous calls to and from dbus
+        DBusGMainLoop(set_as_default=True)
 
-      #formatting 
-      _kwh = lambda p, v: (str(round(v, 2)) + 'KWh')
-      _a = lambda p, v: (str(round(v, 1)) + 'A')
-      _w = lambda p, v: (str(round(v, 1)) + 'W')
-      _v = lambda p, v: (str(round(v, 1)) + 'V')   
+        # formatting
+        _kwh = lambda p, v: (str(round(v, 2)) + 'kWh')
+        _a = lambda p, v: (str(round(v, 1)) + 'A')
+        _w = lambda p, v: (str(round(v, 1)) + 'W')
+        _v = lambda p, v: (str(round(v, 1)) + 'V')
+        _degC = lambda p, v: (str(v) + '°C')
+        _s = lambda p, v: (str(v) + 's')
+        _n = lambda p, v: (str(v))
 
-      #start our main-service
-      smrtmtr_output = DbusttysmartmeterService(
-        config=config,
-        servicename='com.victronenergy.grid',
-        paths={
-          '/Ac/Energy/Forward': {'initial': None, 'textformat': _kwh}, # energy produced by pv inverter
-          '/Ac/Energy/Reverse': {'initial': 0, 'textformat': _kwh}, # energy produced by pv inverter
-          '/Ac/Power': {'initial': 0, 'textformat': _w},
-          
-          '/Ac/Current': {'initial': 0, 'textformat': _a},
-          '/Ac/Voltage': {'initial': 0, 'textformat': _v},
-          
-          '/Ac/L1/Voltage': {'initial': 0, 'textformat': _v},
-          '/Ac/L2/Voltage': {'initial': 0, 'textformat': _v},
-          '/Ac/L3/Voltage': {'initial': 0, 'textformat': _v},
-          '/Ac/L1/Current': {'initial': 0, 'textformat': _a},
-          '/Ac/L2/Current': {'initial': 0, 'textformat': _a},
-          '/Ac/L3/Current': {'initial': 0, 'textformat': _a},
-          '/Ac/L1/Power': {'initial': 0, 'textformat': _w},
-          '/Ac/L2/Power': {'initial': 0, 'textformat': _w},
-          '/Ac/L3/Power': {'initial': 0, 'textformat': _w},
-          '/Ac/L1/Energy/Forward': {'initial': None, 'textformat': _kwh},
-          '/Ac/L2/Energy/Forward': {'initial': None, 'textformat': _kwh},
-          '/Ac/L3/Energy/Forward': {'initial': None, 'textformat': _kwh},
-          '/Ac/L1/Energy/Reverse': {'initial': None, 'textformat': _kwh},
-          '/Ac/L2/Energy/Reverse': {'initial': None, 'textformat': _kwh},
-          '/Ac/L3/Energy/Reverse': {'initial': None, 'textformat': _kwh},
-        })
+        # start our main-service
+        pvac_output = DbusHeidelbergChargerService(
+          servicename='com.victronenergy.evcharger',
+          paths={
+            '/Ac/Power': {'initial': 0, 'textformat': _w},
+            '/Ac/L1/Power': {'initial': 0, 'textformat': _w},
+            '/Ac/L2/Power': {'initial': 0, 'textformat': _w},
+            '/Ac/L3/Power': {'initial': 0, 'textformat': _w},
+            '/Ac/Voltage': {'initial': 0, 'textformat': _v},
+            '/Ac/Frequency': {'initial': 0, 'textformat': _v},
+            '/Ac/Energy/Forward': {'initial': 0, 'textformat': _kwh},
 
-      logging.info('Connected to dbus, and switching over to gobject.MainLoop() (= event based)')
-      mainloop = gobject.MainLoop()
-      mainloop.run()            
-  except Exception as e:
-    logging.critical('Error at %s', 'main', exc_info=e)
-  finally:
-    smrtmtr_output._setConnected(0)
+            '/Current': {'initial': 0, 'textformat': _a},
+            '/MaxCurrent': {'initial': 0, 'textformat': _a},
+            '/SetCurrent': {'initial': 0, 'textformat': _a},
+
+            '/AutoStart': {'initial': 0, 'textformat': _n},
+            '/ChargingTime': {'initial': 0, 'textformat': _s},
+            '/Mode': {'initial': 0, 'textformat': _n},
+            '/StartStop': {'initial': 0, 'textformat': _n},
+            '/Status': {'initial': 0, 'textformat': _n},
+          }
+        )
+
+        logging.info('Connected to dbus, and switching over to gobject.MainLoop() (= event based)')
+        mainloop = gobject.MainLoop()
+        mainloop.run()
+    except Exception as e:
+        logging.critical('Error at %s', 'main', exc_info=e)
+
 if __name__ == "__main__":
-  main()
+    main()
