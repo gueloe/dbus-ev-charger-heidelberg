@@ -1,6 +1,8 @@
 #!/bin/bash
+#set -x
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 SERVICE_NAME=$(basename $SCRIPT_DIR)
+
 
 # set permissions for script files
 chmod a+x $SCRIPT_DIR/restart.sh
@@ -12,10 +14,11 @@ chmod 744 $SCRIPT_DIR/uninstall.sh
 chmod a+x $SCRIPT_DIR/service/run
 chmod 755 $SCRIPT_DIR/service/run
 
+
 # create sym-link to run script in deamon
 ln -s $SCRIPT_DIR/service /service/$SERVICE_NAME
 
-# add install-script to rc.local to be ready for firmware update
+# add install-script to rc.local to restore service after reboot or firmware update
 filename=/data/rc.local
 if [ ! -f $filename ]
 then
@@ -26,3 +29,6 @@ then
 fi
 
 grep -qxF "$SCRIPT_DIR/install.sh" $filename || echo "$SCRIPT_DIR/install.sh" >> $filename
+
+#install minimalmodbus
+pip3 install minimalmodbus

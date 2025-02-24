@@ -1,5 +1,3 @@
 #!/bin/sh
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-
 exec 2>&1
-python $(realpath $SCRIPT_DIR/../dbus-ev-charger-heidelberg.py)
+python /data/dbus-ev-charger-heidelberg/dbus-ev-charger-heidelberg.py
