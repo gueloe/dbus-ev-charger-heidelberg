@@ -2,14 +2,19 @@
 
 ⚠️ Work in progress!!!! ⚠️
 
-This repo integrates a Heidelberg Charge Control  Wallbox into a Victron Venus OS device (e.g. Cerbo GX). The integration
-is using the Victron evcharger model (com.victronenergy.evcharger) and is basically mimic a Victron wallbox.
+This repo integrates a Heidelberg Charge Control  Wallbox into a Victron Venus OS device (e.g. Cerbo GX).
+The integration is using the Victron evcharger model (com.victronenergy.evcharger)
+and is basically mimic a Victron wallbox.
 
 
-It is possible to see the current charging status (not connected, connected, charging etc.) and you can control the charging current.
-As charge mode you can select between manual and automatic (scheduled is not implemented right now). Manual mode is basically the normal charging mode where you can control the charging current and start/stop the charging process.
-Automatic mode is implemented in a node-red flow. It sets the "W/XX/evcharger/YY/SetCurrent" Value over MQTT. XX=VRM Portal ID  YY=DEVICE INSTANCE
-Automatic is used for Charge on Solar. The flow uses akt. PV POWER, BAT POWER, GRID POWER, BAT SOC and the number of used Phases for controlling the EV POWER.
+It is possible to see the current charging status (not connected, connected, charging etc.) and you can control 
+the charging current.
+As charge mode you can select between manual and automatic (scheduled is not implemented right now).
+Manual mode is basically the normal charging mode where you can control the charging current and start/stop the charging process.
+Automatic mode is implemented in a node-red flow.
+It sets the "W/XX/evcharger/YY/SetCurrent" Value over MQTT. XX=VRM Portal ID  YY=DEVICE INSTANCE
+Automatic is used for Charge on Solar.
+The flow uses akt. PV POWER, BAT POWER, GRID POWER, BAT SOC and the number of used Phases for controlling the EV POWER.
 
 ### Software
 
