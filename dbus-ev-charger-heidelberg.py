@@ -101,6 +101,7 @@ class DbusHeidelbergChargerService:
     def __init__(self, config, servicename, paths, productname='HeidelbergRTUService', connection='Heidelberg-Charger Modbus RTU service'):
         global modbusClient
         deviceinstance = int(config['DEFAULT']['Deviceinstance'])
+        customname = config['DEFAULT']['CustomName']
         self.charging_time = {"start": None, "calculate": False, "stopped_since": 0}        
         self.STOP_CHARGING_COUNTER_AFTER = 10
         self.charging_current = 0
@@ -144,9 +145,9 @@ class DbusHeidelbergChargerService:
         self._dbusservice.add_path('/DeviceInstance', deviceinstance)
         self._dbusservice.add_path('/ProductId', 0xFFFF)
         self._dbusservice.add_path('/ProductName', productname)
-        self._dbusservice.add_path('/CustomName', 'Heidelberg EC')
+        self._dbusservice.add_path('/CustomName', customname)
         self._dbusservice.add_path('/FirmwareVersion', 'FirmwareVersion')
-        self._dbusservice.add_path('/Serial', 'Serial')
+        self._dbusservice.add_path('/Serial', devicename)
         self._dbusservice.add_path('/HardwareVersion', 'Energy Control')
         self._dbusservice.add_path('/Connected', 1)
         self._dbusservice.add_path('/UpdateIndex', 0)
@@ -174,8 +175,8 @@ class DbusHeidelbergChargerService:
             sys.exit()
 
   
-        self._dbusservice.add_path('/History/Ac/Energy/Forward',self.Energy/100)
- 
+        self._dbusservice.add_path('/History/Ac/Energy/Forward',self.Energy)
+        self._dbusservice.add_path('/Ac/Energy/ForwardStart',self.Energy)
 
     
 
@@ -225,7 +226,7 @@ class DbusHeidelbergChargerService:
             self._dbusservice['/FirmwareVersion'] = "Modbus Register-Layouts Version %x" % data[0] 
             self.Energy =  ((data[14] + (data[13]*65536))/1000 )
             
-            self._dbusservice['/History/Ac/Energy/Forward'] =  self.Energy/100
+            self._dbusservice['/History/Ac/Energy/Forward'] =  self.Energy
             self._dbusservice['/Ac/Energy/Forward'] =  self.Energy - self._dbusservice['/Ac/Energy/ForwardStart'] 
             self._dbusservice['/MCU/Temperature'] = data[5]/10.0          
 
@@ -251,11 +252,7 @@ class DbusHeidelbergChargerService:
             self._dbusservice['/Current'] = float(data[2])/10.0
 
 
-           # initial set of Forward Start
-            if self._dbusservice['/Ac/Energy/ForwardStart'] == 0:
-                self._dbusservice['/Ac/Energy/ForwardStart'] = self.Energy
-
-
+  
 
             self.StatusOld = self._dbusservice['/Status']
 
@@ -400,7 +397,6 @@ def main():
             '/Ac/L3/Current': {'initial': 0, 'textformat': _a},
             '/Ac/Frequency': {'initial': 0, 'textformat': _v},
             '/Ac/Energy/Forward': {'initial': 0, 'textformat': _kwh},
-            '/Ac/Energy/ForwardStart': {'initial': 0, 'textformat': _kwh},
             '/Current': {'initial': 0, 'textformat': _a},
             '/MinCurrent': {'initial': 0, 'textformat': _a},
             '/MaxCurrent': {'initial': 0, 'textformat': _a},

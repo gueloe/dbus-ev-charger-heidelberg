@@ -1,17 +1,15 @@
 [DEFAULT]
-CustomName=e-Up
 #Possible Options for Log Level: CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET
-Logging=DEBUG
-#Status log each 60 Minutes
-SignOfLifeLog=60
-Deviceinstance=6
+Logging=INFO   
+SignOfLifeLog=10
+Deviceinstance=5
 #Position 0: ac out, 1: ac in
 Position=1
 
 
 [ModbusRTU]
 # you need to provide the correct name listed within /dev/serial/by-id/
-Devicename=usb-WCH.CN_USB_Quad_Serial_BCC699ABCD-if06
+Devicename=usb-1a86_USB_Single_Serial_56D1091605-if00
 DebugModbus=0
 
 
