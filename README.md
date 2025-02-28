@@ -78,7 +78,7 @@ In normal auto mode, the flow tries to adjust the EV POWER, so that the current 
   - Connected to RASP PI4 over RS485 Adapter
 - Victron Energy RASP PI4 Venus OS - Firmware v3.53
   - IR Sensor (USB)
-  - DIY AKKU 16 KW/h (TTL-USB), MP2 5000 (MK3, HUAWEI PV INVERTER (MODBUS TCP) 
+  - DIY AKKU 16 KW/h (TTL-USB), MP2 5000 (MK3), HUAWEI PV INVERTER (MODBUS TCP) 
 
 
 ### Details / Process
@@ -88,9 +88,8 @@ etc/udev/rules.d/serial-starter.rules and ignore approach.
 
 So what is the script doing:
 - Running as a service
-- connecting to DBus of the Venus OS `com.victronenergy.ev
+- connecting to DBus of the Venus OS com.victronenergy.ev
 - and to Heidelberg Energy Controll Wallbox over USB-RS485 Adapter.
-- The service uses minimalmodbus for Communication to the wallbox 
-- Easy-to-use Modbus RTU and Modbus ASCII implementation for Python - https://pypi.org/project/minimalmodbus/
+- The service uses minimalmodbus for communication to the wallbox (Easy-to-use Modbus RTU and Modbus ASCII implementation for Python - https://pypi.org/project/minimalmodbus/
 
 - Info to heidelberg modbus https://www.amperfied.de/wp-content/uploads/2023/03/20220809_AMP-Erweiterte-ModBus-Registerbeschreibung.pdf
