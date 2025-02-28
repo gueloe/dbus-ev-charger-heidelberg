@@ -88,8 +88,7 @@ etc/udev/rules.d/serial-starter.rules and ignore approach.
 
 So what is the script doing:
 - Running as a service
-- connecting to DBus of the Venus OS com.victronenergy.ev
-- and to Heidelberg Energy Controll Wallbox over USB-RS485 Adapter.
-- The service uses minimalmodbus for communication to the wallbox (Easy-to-use Modbus RTU and Modbus ASCII implementation for Python - https://pypi.org/project/minimalmodbus/
+- connecting to DBus of the Venus OS com.victronenergy.ev and to Heidelberg Energy Controll Wallbox over USB-RS485 Adapter.
+- The service uses minimalmodbus for communication to the wallbox (Easy-to-use Modbus RTU and Modbus ASCII implementation for Python - https://pypi.org/project/minimalmodbus/)
 
 - Info to heidelberg modbus https://www.amperfied.de/wp-content/uploads/2023/03/20220809_AMP-Erweiterte-ModBus-Registerbeschreibung.pdf
