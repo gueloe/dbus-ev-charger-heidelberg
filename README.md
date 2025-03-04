@@ -24,7 +24,10 @@ To provide the software on your Venus OS, execute there these commands:
 wget https://github.com/gueloe/dbus-ev-charger-heidelberg/archive/refs/heads/main.zip
 unzip main.zip "dbus-ev-charger-heidelberg-main/*" -d /data
 rm main.zip
-mv /data/dbus--ev-charger-heidelberg-main/ /data/dbus-ev-charger-heidelberg/
+mv /data/dbus-ev-charger-heidelberg-main/ /data/dbus-ev-charger-heidelberg/
+cd /data/dbus-ev-charger-heidelberg/
+chmod a+x ./install.sh
+chmod 744 ./install.sh
 ````
 
 
