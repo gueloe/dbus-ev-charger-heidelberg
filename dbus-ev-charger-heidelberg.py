@@ -111,6 +111,12 @@ class DbusHeidelbergChargerService:
         self.StatusOld = 0
         self.Status = 0
         devicename = config['ModbusRTU']['Devicename']
+        iDisableStandby = int(config['ModbusRTU']['DisableStandby'])
+        logging.info("iDisableStandby = %i" % (iDisableStandby))
+        if iDisableStandby != 0:
+           iDisableStandby = 4
+        else:
+           iDisableStandby = 0 
         devicepath = os.popen('readlink -f /dev/serial/by-id/%s' %devicename).read().replace('\n', '')
         ttyname = devicepath.replace('/dev/', '')
         os.system('/opt/victronenergy/serial-starter/stop-tty.sh %s' %ttyname)
@@ -165,7 +171,9 @@ class DbusHeidelbergChargerService:
             data = modbusClient.read_registers(4, 15,functioncode=4)  # Registernumber, number of decimals
             self._dbusservice['/FirmwareVersion'] = "Modbus Register-Layouts Version %x" % data[0] 
             self.Energy =  ((data[14] + (data[13]*65536))/1000 )
-            logging.info("Read Heidelberg Wallbox Current Settings - MinCurrent=%i MaxCurrent=%i self.Energy=%f" % (self._dbusservice['/MinCurrent'],self._dbusservice['/MaxCurrent'],self.Energy))
+            
+            modbusClient.write_register(258, iDisableStandby ,functioncode=6) 
+            logging.info("Read Heidelberg Wallbox Current Settings - MinCurrent=%i MaxCurrent=%i self.Energy=%f iDisableStandby=%i" % (self._dbusservice['/MinCurrent'],self._dbusservice['/MaxCurrent'],self.Energy,iDisableStandby))
  
         except minimalmodbus.NoResponseError:
             time.sleep(60)
@@ -286,6 +294,7 @@ class DbusHeidelbergChargerService:
             if (self.Status == 3 or self.Status == 0) and self.StatusOld == 2:
                 self.charging_time["stopped_since"] = now
                 logging.info("Stop Charging: Energy: %f reset after %i Seconds" % (self.Energy,self.STOP_CHARGING_COUNTER_AFTER))
+                self._dbusservice['/SetCurrent'] = 0
 
             if self.charging_time["stopped_since"] is not None and self.STOP_CHARGING_COUNTER_AFTER < (now - self.charging_time["stopped_since"]):
                 self.charging_time["start"] = None
