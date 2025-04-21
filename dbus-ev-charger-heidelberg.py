@@ -99,57 +99,39 @@ Heidelberg Status; data[1]
 
 class DbusHeidelbergChargerService:
     def __init__(self, config, servicename, paths, productname='HeidelbergRTUService', connection='Heidelberg-Charger Modbus RTU service'):
-        global modbusClient
-        deviceinstance = int(config['DEFAULT']['Deviceinstance'])
-        customname = config['DEFAULT']['CustomName']
-        self.Status = 0
-        iDisableStandby = int(config['ModbusRTU']['DisableStandby'])
-        logging.info("iDisableStandby = %i" % (iDisableStandby))
-        if iDisableStandby != 0:
-           iDisableStandby = 4
-        else:
-           iDisableStandby = 0 
-        devicepath = os.popen('readlink -f /dev/serial/by-id/%s' %devicename).read().replace('\n', '')
-        ttyname = devicepath.replace('/dev/', '')
-        
-        self.bDebug=False
-        modbusClient.serial.timeout  = 0.1      # seconds
-        modbusClient.address         = 1        # this is the slave address number
-        modbusClient.mode = minimalmodbus.MODE_RTU # rtu or ascii mode
-        modbusClient.clear_buffers_before_each_transaction = True
-
-        logging.debug("%s /DeviceInstance = %d" % (servicename, deviceinstance))
-
-        self._dbusservice.add_path('/Mgmt/ProcessName', __file__)
-        self._dbusservice.add_path('/Mgmt/ProcessVersion', 'V 1.0.1, and running on Python ' + platform.python_version())
-        self._dbusservice.add_path('/Mgmt/Connection', connection)
-        self._dbusservice.add_path('/CustomName', customname)
-        self._dbusservice.add_path('/FirmwareVersion', 'FirmwareVersion')
-        self._dbusservice.add_path('/Serial', devicename)
-        self._dbusservice.add_path('/HardwareVersion', 'Energy Control')
-        self._dbusservice.add_path('/Connected', 1)
-        self._dbusservice.add_path('/UpdateIndex', 0)
-        self._dbusservice.add_path('/Position', self.acposition) # 0: ac out, 1: ac in
-        # add path values to dbus
-        for path, settings in self._paths.items():
-            self._dbusservice.add_path(path, settings['initial'], gettextcallback=settings['textformat'], writeable=True, onchangecallback=self._handlechangedvalue)
- 
+      global modbusClient
         try:
-            data = modbusClient.read_registers(100, 2,functioncode=4)  # Registernumber, number of decimals
-            self._dbusservice['/MaxCurrent'] = data[0]
-            self._dbusservice['/MinCurrent'] = data[1]
-            time.sleep(1)
-            data = modbusClient.read_registers(4, 15,functioncode=4)  # Registernumber, number of decimals
-            self._dbusservice['/FirmwareVersion'] = "Modbus Register-Layouts Version %x" % data[0] 
-            self.Energy =  ((data[14] + (data[13]*65536))/1000 )
+            deviceinstance = int(config['DEFAULT']['Deviceinstance'])
+            customname = config['DEFAULT']['CustomName']
+            self.charging_time = {"start": None, "calculate": False, "stopped_since": 0}        
+            self.STOP_CHARGING_COUNTER_AFTER = 10
+            self.charging_current = 0
+            self.ret_current = 0
+            self.Energy = 0
+            self.heidelberg_status = 0
+            self.StatusOld = 0
             self.Status = 0
+            self.Registered = 0
+            devicename = config['ModbusRTU']['Devicename']
+            self.iDisableStandby = int(config['ModbusRTU']['DisableStandby'])
+            
+            if self.iDisableStandby != 0:
                 self.iDisableStandby = 4
+            else:
+                self.iDisableStandby = 0 
+            devicepath = os.popen('readlink -f /dev/serial/by-id/%s' %devicename).read().replace('\n', '')
+            ttyname = devicepath.replace('/dev/', '')
+            os.system('/opt/victronenergy/serial-starter/stop-tty.sh %s' %ttyname)
             
             self.bDebug=False
             if int(config['ModbusRTU']['DebugModbus']) == 1:
                 self.bDebug=True
             modbusClient = minimalmodbus.Instrument(devicepath, 1,close_port_after_each_call=True, debug=self.bDebug)  # port name, slave address (in decimal)
             modbusClient.serial.baudrate = 19200  # baudrate
+            modbusClient.serial.bytesize = 8
+            modbusClient.serial.parity   = serial.PARITY_EVEN
+            modbusClient.serial.stopbits = 1
+            modbusClient.serial.timeout  = 0.1      # seconds
             modbusClient.address         = 1        # this is the slave address number
             modbusClient.mode = minimalmodbus.MODE_RTU # rtu or ascii mode
             modbusClient.clear_buffers_before_each_transaction = True
@@ -157,11 +139,32 @@ class DbusHeidelbergChargerService:
 
             self._dbusservice = VeDbusService("{}.{}".format(servicename, devicename), register=False)
             self._paths = paths
+
+            self.enable_charging = True # start/stop
+
+            logging.debug("%s /DeviceInstance = %d" % (servicename, deviceinstance))
+
+        # Create the management objects, as specified in the ccgx dbus-api document
+            self._dbusservice.add_path('/Mgmt/ProcessName', __file__)
+            self._dbusservice.add_path('/Mgmt/ProcessVersion', 'Python ' + platform.python_version())
+            self._dbusservice.add_path('/Mgmt/Connection', 'serial=/dev/' + ttyname )
+
+            # Create the mandatory objects
+            self._dbusservice.add_path('/DeviceInstance', deviceinstance)
+            self._dbusservice.add_path('/ProductId', 0xFFFF)
+            self._dbusservice.add_path('/ProductName', productname)
+            self._dbusservice.add_path('/CustomName', customname)
+            self._dbusservice.add_path('/FirmwareVersion', '20250421 V 1.0.3 gueloe')
+            self._dbusservice.add_path('/HardwareVersion', '??')
+            self._dbusservice.add_path('/Serial', devicename)
+            self._dbusservice.add_path('/Connected', 0)
+            self._dbusservice.add_path('/UpdateIndex', 0)
+            self._dbusservice.add_path('/Position', self.acposition) # 0: ac out, 1: ac in
+            # add path values to dbus
+            for path, settings in self._paths.items():
                 self._dbusservice.add_path(path, settings['initial'], gettextcallback=settings['textformat'], writeable=True, onchangecallback=self._handlechangedvalue)
+            self._dbusservice.register()
             
-            modbusClient.write_register(258, iDisableStandby ,functioncode=6) 
-            logging.info("Read Heidelberg Wallbox Current Settings - MinCurrent=%i MaxCurrent=%i self.Energy=%f iDisableStandby=%i" % (self._dbusservice['/MinCurrent'],self._dbusservice['/MaxCurrent'],self.Energy,iDisableStandby))
-        except minimalmodbus.NoResponseError:
     
             logging.debug("init devicepath=%s ttyname=%s devicename=%s"   % (devicepath, ttyname,devicename))
 
