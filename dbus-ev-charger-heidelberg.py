@@ -102,15 +102,7 @@ class DbusHeidelbergChargerService:
         global modbusClient
         deviceinstance = int(config['DEFAULT']['Deviceinstance'])
         customname = config['DEFAULT']['CustomName']
-        self.charging_time = {"start": None, "calculate": False, "stopped_since": 0}        
-        self.STOP_CHARGING_COUNTER_AFTER = 10
-        self.charging_current = 0
-        self.ret_current = 0
-        self.Energy = 0
-        self.heidelberg_status = 0
-        self.StatusOld = 0
         self.Status = 0
-        devicename = config['ModbusRTU']['Devicename']
         iDisableStandby = int(config['ModbusRTU']['DisableStandby'])
         logging.info("iDisableStandby = %i" % (iDisableStandby))
         if iDisableStandby != 0:
@@ -119,38 +111,18 @@ class DbusHeidelbergChargerService:
            iDisableStandby = 0 
         devicepath = os.popen('readlink -f /dev/serial/by-id/%s' %devicename).read().replace('\n', '')
         ttyname = devicepath.replace('/dev/', '')
-        os.system('/opt/victronenergy/serial-starter/stop-tty.sh %s' %ttyname)
         
         self.bDebug=False
-        if int(config['ModbusRTU']['DebugModbus']) == 1:
-            self.bDebug=True
-        modbusClient = minimalmodbus.Instrument(devicepath, 1,close_port_after_each_call=True, debug=self.bDebug)  # port name, slave address (in decimal)
-        modbusClient.serial.baudrate = 19200  # baudrate
-        modbusClient.serial.bytesize = 8
-        modbusClient.serial.parity   = serial.PARITY_EVEN
-        modbusClient.serial.stopbits = 1
         modbusClient.serial.timeout  = 0.1      # seconds
         modbusClient.address         = 1        # this is the slave address number
         modbusClient.mode = minimalmodbus.MODE_RTU # rtu or ascii mode
         modbusClient.clear_buffers_before_each_transaction = True
-        self.acposition = int(config['DEFAULT']['Position'])
-
-        self._dbusservice = VeDbusService("{}.{}".format(servicename, devicename), register=False)
-        self._paths = paths
-
-        self.enable_charging = True # start/stop
 
         logging.debug("%s /DeviceInstance = %d" % (servicename, deviceinstance))
 
-    # Create the management objects, as specified in the ccgx dbus-api document
         self._dbusservice.add_path('/Mgmt/ProcessName', __file__)
         self._dbusservice.add_path('/Mgmt/ProcessVersion', 'V 1.0.1, and running on Python ' + platform.python_version())
         self._dbusservice.add_path('/Mgmt/Connection', connection)
-
-        # Create the mandatory objects
-        self._dbusservice.add_path('/DeviceInstance', deviceinstance)
-        self._dbusservice.add_path('/ProductId', 0xFFFF)
-        self._dbusservice.add_path('/ProductName', productname)
         self._dbusservice.add_path('/CustomName', customname)
         self._dbusservice.add_path('/FirmwareVersion', 'FirmwareVersion')
         self._dbusservice.add_path('/Serial', devicename)
@@ -162,7 +134,6 @@ class DbusHeidelbergChargerService:
         for path, settings in self._paths.items():
             self._dbusservice.add_path(path, settings['initial'], gettextcallback=settings['textformat'], writeable=True, onchangecallback=self._handlechangedvalue)
  
-
         try:
             data = modbusClient.read_registers(100, 2,functioncode=4)  # Registernumber, number of decimals
             self._dbusservice['/MaxCurrent'] = data[0]
@@ -171,42 +142,38 @@ class DbusHeidelbergChargerService:
             data = modbusClient.read_registers(4, 15,functioncode=4)  # Registernumber, number of decimals
             self._dbusservice['/FirmwareVersion'] = "Modbus Register-Layouts Version %x" % data[0] 
             self.Energy =  ((data[14] + (data[13]*65536))/1000 )
+            self.Status = 0
+                self.iDisableStandby = 4
+            
+            self.bDebug=False
+            if int(config['ModbusRTU']['DebugModbus']) == 1:
+                self.bDebug=True
+            modbusClient = minimalmodbus.Instrument(devicepath, 1,close_port_after_each_call=True, debug=self.bDebug)  # port name, slave address (in decimal)
+            modbusClient.serial.baudrate = 19200  # baudrate
+            modbusClient.address         = 1        # this is the slave address number
+            modbusClient.mode = minimalmodbus.MODE_RTU # rtu or ascii mode
+            modbusClient.clear_buffers_before_each_transaction = True
+            self.acposition = int(config['DEFAULT']['Position'])
+
+            self._dbusservice = VeDbusService("{}.{}".format(servicename, devicename), register=False)
+            self._paths = paths
+                self._dbusservice.add_path(path, settings['initial'], gettextcallback=settings['textformat'], writeable=True, onchangecallback=self._handlechangedvalue)
             
             modbusClient.write_register(258, iDisableStandby ,functioncode=6) 
             logging.info("Read Heidelberg Wallbox Current Settings - MinCurrent=%i MaxCurrent=%i self.Energy=%f iDisableStandby=%i" % (self._dbusservice['/MinCurrent'],self._dbusservice['/MaxCurrent'],self.Energy,iDisableStandby))
- 
         except minimalmodbus.NoResponseError:
-            time.sleep(60)
-            sys.exit()
+    
+            logging.debug("init devicepath=%s ttyname=%s devicename=%s"   % (devicepath, ttyname,devicename))
+
+    
+            # add _update function 'timer'
+            gobject.timeout_add(1000, self._update) # pause 2000ms before the next request
+
+            gobject.timeout_add( int(config['DEFAULT']['SignOfLifeLog'])*60*1000, self._signOfLife)
+
         except Exception as e:
             logging.critical('Error at %s', '_init', exc_info=e)
             sys.exit()
-
-  
-        self._dbusservice.add_path('/History/Ac/Energy/Forward',self.Energy)
-        self._dbusservice.add_path('/Ac/Energy/ForwardStart',self.Energy)
-
-    
-
-
-        logging.info("init devicepath=%s ttyname=%s devicename=%s"   % (devicepath, ttyname,devicename))
-
-        self._dbusservice.register()
-    
-     
-
-        # last update
-        self._lastUpdate = 0
-        self._lastUpdateOld = 0
-        # charging time in float
-        self._chargingTime = 0.0
-
-        # add _update function 'timer'
-        gobject.timeout_add(1000, self._update) # pause 2000ms before the next request
-
-        gobject.timeout_add( int(config['DEFAULT']['SignOfLifeLog'])*60*1000, self._signOfLife)
-
-   
    
     def _handlechangedvalue(self, path, value):
         #logging.critical("someone else updated %s to %s" % (path, value))
@@ -229,9 +196,34 @@ class DbusHeidelbergChargerService:
     def _update(self):
         try:
             now = int(time.time())
-            #logging.info("Update")
+            if self._dbusservice['/Connected'] == 0:
+                # # increment UpdateIndex - to show that new data is available
+                index = self._dbusservice['/UpdateIndex'] + 1  # increment index
+                if index > 255:   # maximum value of the index
+                    index = 0       # overflow from 255 to 0
+                self._dbusservice['/UpdateIndex'] = index
+                data = modbusClient.read_registers(100, 2,functioncode=4)  # Registernumber, number of decimals
+                self._dbusservice['/MaxCurrent'] = data[0]
+                self._dbusservice['/MinCurrent'] = data[1]
+                time.sleep(1)
+                data = modbusClient.read_registers(200, 4,functioncode=4)  # Registernumber, number of decimals
+                sHw = 'HB-HW-Var=' +  str(data[0]) + ' HB-App-SW-Rev=' + str(data[3])
+                time.sleep(1)
+                modbusClient.write_register(258, self.iDisableStandby ,functioncode=6) 
+                time.sleep(1)
+                data = modbusClient.read_registers(4, 15,functioncode=4)  # Registernumber, number of decimals
+                self._dbusservice['/HardwareVersion'] =  sHw + ' MB Reg-Lay- Ver=' + str(hex(data[0]))
+ 
+ 
+                self.Energy =  ((data[14] + (data[13]*65536))/1000 )
+                self._dbusservice.add_path('/History/Ac/Energy/Forward',self.Energy)
+                self._dbusservice.add_path('/Ac/Energy/ForwardStart',self.Energy)
+                time.sleep(5)
+                self._dbusservice['/Connected'] = 1  
+                logging.info("Read Heidelberg Wallbox Current Settings - MinCurrent=%i MaxCurrent=%i self.Energy=%f iDisableStandby=%i" % (self._dbusservice['/MinCurrent'],self._dbusservice['/MaxCurrent'],self.Energy,self.iDisableStandby))
+  
+
             data = modbusClient.read_registers(4, 15,functioncode=4)  # Registernumber, number of decimals
-            self._dbusservice['/FirmwareVersion'] = "Modbus Register-Layouts Version %x" % data[0] 
             self.Energy =  ((data[14] + (data[13]*65536))/1000 )
             
             self._dbusservice['/History/Ac/Energy/Forward'] =  self.Energy
@@ -266,7 +258,10 @@ class DbusHeidelbergChargerService:
 
             if self.StatusOld  != 3:
                 if data[1] == 0 or data[1] == 1 or data[1] == 2 or data[1] == 3: # not connected
-                     self.Status  = 0 # not connected
+                    if self.StatusOld == 2:
+                        self.Status = 3 # Charged
+                    else:
+                        self.Status = 0 # connected
                 elif  data[1] == 4 or data[1] == 5  or data[1] == 6: # connected - wait for ok
                      if self.StatusOld == 2:
                         self.Status = 3 # Charged
@@ -283,7 +278,14 @@ class DbusHeidelbergChargerService:
                 else:
                     self.Status = 8 # PLACEHOLDER: ground test error
 
-            #logging.info("self.Status=%i old=%i" % (self.Status,self._dbusservice['/Status']))
+        
+
+            if (self.Status == 1 and self.StatusOld == 0) or ( self.charging_current == 0 and self._dbusservice['/SetCurrent'] > 0):
+                self.charging_time["start"] = None
+                self.charging_time["stopped_since"] = None
+                self._dbusservice["/ChargingTime"] = None
+                self._dbusservice['/Ac/Energy/ForwardStart'] = self.Energy
+                logging.info("Car Connected or Restart: Reset Last Charging - Energy: %f" % (self.Energy))
 
 
             if self.Status == 2 and self.StatusOld == 1:
@@ -291,20 +293,15 @@ class DbusHeidelbergChargerService:
                 logging.info("Start Charging: Energy: %f" % (self.Energy))
  
 
-            if (self.Status == 3 or self.Status == 0) and self.StatusOld == 2:
+            if self.Status == 3 and self.StatusOld == 2:
                 self.charging_time["stopped_since"] = now
-                logging.info("Stop Charging: Energy: %f reset after %i Seconds" % (self.Energy,self.STOP_CHARGING_COUNTER_AFTER))
+                logging.info("Stop Charging: Energy: %f " % (self.Energy - self._dbusservice['/Ac/Energy/ForwardStart']))
                 self._dbusservice['/SetCurrent'] = 0
-
-            if self.charging_time["stopped_since"] is not None and self.STOP_CHARGING_COUNTER_AFTER < (now - self.charging_time["stopped_since"]):
-                self.charging_time["start"] = None
-                self.charging_time["stopped_since"] = None
-                self._dbusservice["/ChargingTime"] = None
                 self.Status = 1
-                self._dbusservice['/Ac/Energy/ForwardStart'] = self.Energy
-                logging.info("Reset Charging: Energy: %f after %i Seconds" % (self.Energy,self.STOP_CHARGING_COUNTER_AFTER))
+
+          
             if self._dbusservice['/Status']  != self.Status:
-                logging.info("Victron EV Status changed self.Status=%i old=%i" % (self.Status,self._dbusservice['/Status']))
+                logging.info("Victron EV Status changed self.Status=%i old=%i WB status=%i" % (self.Status,self._dbusservice['/Status'],data[1]))
 
             self._dbusservice['/Status']  = self.Status
 
@@ -355,8 +352,16 @@ class DbusHeidelbergChargerService:
                 self.heidelberg_status =  data[1]  
               
         except minimalmodbus.NoResponseError:
-            sys.exit()
-            #logging.critical('minimalmodbus.NoResponseError')
+            if self._dbusservice['/Connected'] == 1:
+                logging.debug('minimalmodbus.NoResponseError in update - restart sleep 15s')
+                time.sleep(15)
+                #sys.exit()
+            else:
+                logging.debug('minimalmodbus.NoResponseError in update - sleep 15s')
+                time.sleep(15)
+                #sys.exit()
+                
+
         except Exception as e:
             logging.critical('Error at %s', '_update', exc_info=e)
             sys.exit()
@@ -413,7 +418,7 @@ def main():
             '/MCU/Temperature': {'initial': 0, 'textformat': _degC},
             '/AutoStart': {'initial': 0, 'textformat': _n},
             '/ChargingTime': {'initial': 0, 'textformat': _s},
-            '/Mode': {'initial': 0, 'textformat': _n},
+            '/Mode': {'initial': 1, 'textformat': _n},
             '/StartStop': {'initial': 0, 'textformat': _n},
             '/Status': {'initial': 0, 'textformat': _n},
           }
