@@ -99,7 +99,7 @@ Heidelberg Status; data[1]
 
 class DbusHeidelbergChargerService:
     def __init__(self, config, servicename, paths, productname='HeidelbergRTUService', connection='Heidelberg-Charger Modbus RTU service'):
-      global modbusClient
+        global modbusClient
         try:
             deviceinstance = int(config['DEFAULT']['Deviceinstance'])
             customname = config['DEFAULT']['CustomName']
@@ -283,7 +283,7 @@ class DbusHeidelbergChargerService:
 
         
 
-            if (self.Status == 1 and self.StatusOld == 0) or ( self.charging_current == 0 and self._dbusservice['/SetCurrent'] > 0):
+            if (self.Status == 1 and self.StatusOld == 0): # sonst or ( self.charging_current == 0 and self._dbusservice['/SetCurrent'] > 0):
                 self.charging_time["start"] = None
                 self.charging_time["stopped_since"] = None
                 self._dbusservice["/ChargingTime"] = None
@@ -293,6 +293,9 @@ class DbusHeidelbergChargerService:
 
             if self.Status == 2 and self.StatusOld == 1:
                 self.charging_time["start"] = now
+                self.charging_time["stopped_since"] = None
+                self._dbusservice["/ChargingTime"] = None
+                self._dbusservice['/Ac/Energy/ForwardStart'] = self.Energy
                 logging.info("Start Charging: Energy: %f" % (self.Energy))
  
 
